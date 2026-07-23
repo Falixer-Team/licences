@@ -24,6 +24,40 @@ GET /query?target=panel.example.com
 
 未找到返回 `404`。失效或已撤销的授权仍返回 `200`，但 `active` 为 `false`。
 
+### 使用授权码兑换
+
+```text
+POST /redeem
+Content-Type: application/json
+```
+
+```json
+{
+  "code": "FLX-ABCDEF-123456-ABCDEF-123456-ABCDEF",
+  "target": "panel.example.com",
+  "userEmail": "owner@example.com"
+}
+```
+
+授权码只能成功兑换一次。`userEmail` 是授权使用者邮箱，用于后台追溯，兑换时必须提供。兑换后将按授权码预设的套餐创建目标授权，并返回授权信息，但不会回显邮箱。目标已有授权时返回 `409`；授权码不存在、已兑换、已撤销或已过期时不会创建授权。
+
+### 解除兑换码绑定
+
+```text
+POST /unbind
+Content-Type: application/json
+```
+
+```json
+{
+  "code": "FLX-ABCDEF-123456-ABCDEF-123456-ABCDEF",
+  "target": "panel.example.com",
+  "userEmail": "owner@example.com"
+}
+```
+
+兑换码、使用者邮箱和当前绑定目标必须全部匹配。解绑会删除当前面板授权，并将兑换码恢复为可再次兑换状态；绑定和解绑事件会永久保存在 `license_binding_audit` 中用于追溯。公开响应不会返回邮箱。
+
 ### 健康检查
 
 ```text
@@ -42,12 +76,15 @@ Authorization: Bearer <ADMIN_API_KEY>
 - `POST /admin/licenses`：创建授权。
 - `PATCH /admin/licenses/:id`：更新、续期或撤销授权。
 - `DELETE /admin/licenses/:id`：永久删除授权。
+- `GET /admin/codes?limit=50`：列出最近生成的授权码记录（只显示前缀，不返回原码）。
+- `POST /admin/codes`：批量生成绑定特定套餐的一次性授权码。
 
 创建个人免费版：
 
 ```json
 {
   "target": "panel.example.com",
+  "userEmail": "owner@example.com",
   "plan": "个人免费版",
   "duration": "永久",
   "expiresAt": null
@@ -59,6 +96,7 @@ Authorization: Bearer <ADMIN_API_KEY>
 ```json
 {
   "target": "panel.example.com",
+  "userEmail": "owner@example.com",
   "plan": "年付授权",
   "duration": "1 年",
   "issuedAt": "2026-07-23T00:00:00.000Z",
@@ -70,6 +108,7 @@ Authorization: Bearer <ADMIN_API_KEY>
 
 ```json
 {
+  "userEmail": "new-owner@example.com",
   "expiresAt": "2028-07-23T00:00:00.000Z",
   "revoked": false
 }
@@ -77,14 +116,55 @@ Authorization: Bearer <ADMIN_API_KEY>
 
 将 `revoked` 设置为 `true` 可撤销，设置为 `false` 可恢复。
 
+`userEmail` 在创建授权和兑换授权码时为必填字段，管理员可以通过 PATCH 修正邮箱。兑换时邮箱也会保存在兑换码审计记录中，确保授权被删除后仍可追溯。邮箱只在受 Bearer 密钥保护的管理列表、兑换码列表和管理创建响应中出现；公开 `/query` 和 `/redeem` 响应不会返回邮箱。
+
+生成 10 个一年商业版授权码：
+
+```json
+{
+  "plan": "年付授权",
+  "duration": "1 年",
+  "durationDays": 365,
+  "quantity": 10,
+  "expiresAt": "2026-12-31T23:59:59.000Z"
+}
+```
+
+- `durationDays` 决定兑换后授权的有效天数；不传或传 `null` 表示永久授权。
+- `expiresAt` 是授权码自身的兑换截止时间，与兑换后授权的到期时间不同。
+- `quantity` 范围为 1–100，默认生成 1 个。
+- 明文授权码仅在生成响应中返回一次。数据库只保存 SHA-256 摘要，之后的列表接口无法恢复原码，请及时安全保存。
+
 ## 创建 Cloudflare D1 数据库
 
 1. 注册或登录 Cloudflare。域名不需要添加到 Cloudflare。
 2. 在 Cloudflare Dashboard 中打开 **Storage & databases → D1 SQL database**。
 3. 创建数据库，例如 `falixer-licences`。
 4. 记录数据库 UUID 和 Cloudflare Account ID。
-5. 在 D1 控制台执行 `schema.sql` 的全部内容。
+5. 新数据库在 D1 控制台执行 `schema.sql` 的全部内容。
 6. 在 **My Profile → API Tokens** 创建 API Token，只授予目标账户的 **D1 Edit** 权限。
+
+### 已有数据库增加邮箱字段
+
+`CREATE TABLE IF NOT EXISTS` 不会修改已有表。已有数据库必须先备份，再在 D1 控制台执行 `migrations/001_add_license_user_email.sql`，然后部署新版 API。如果此前已经执行过旧版 `001`，不要重复执行其中的 `ALTER TABLE`，只需执行 `migrations/002_add_binding_audit.sql` 创建解绑审计表。
+
+迁移允许已有授权暂时没有邮箱，但数据库触发器会强制所有新授权提供邮箱。历史授权必须使用真实且可核实的地址逐条回填，不要使用虚构占位邮箱：
+
+```sql
+UPDATE licenses
+SET user_email = 'owner@example.com'
+WHERE id = '授权 UUID' AND user_email IS NULL;
+```
+
+检查仍缺少邮箱的历史授权：
+
+```sql
+SELECT id, target, plan
+FROM licenses
+WHERE user_email IS NULL OR trim(user_email) = '';
+```
+
+管理列表包含邮箱个人信息，只应通过 HTTPS 和受保护的管理密钥访问，响应不得写入公开日志。
 
 D1 免费版目前适合此类小型授权数据：数据库上限 500 MB；授权表每条数据很小，足够存储大量授权记录。
 

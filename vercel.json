@@ -17,7 +17,10 @@
     { "source": "/", "destination": "/api/index" },
     { "source": "/health", "destination": "/api/index?route=health" },
     { "source": "/query", "destination": "/api/index?route=query" },
+    { "source": "/redeem", "destination": "/api/index?route=redeem" },
+    { "source": "/unbind", "destination": "/api/index?route=unbind" },
     { "source": "/admin/licenses", "destination": "/api/index?route=admin" },
-    { "source": "/admin/licenses/:id", "destination": "/api/index?route=admin&id=:id" }
+    { "source": "/admin/licenses/:id", "destination": "/api/index?route=admin&id=:id" },
+    { "source": "/admin/codes", "destination": "/api/index?route=admin-codes" }
   ]
 }
