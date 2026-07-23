@@ -2,6 +2,8 @@
 
 无 UI 的 Falixer 授权服务，直接部署到 Vercel。数据保存在 Cloudflare D1，Vercel Function 通过 Cloudflare 官方 REST API 访问数据库，不使用 Cloudflare Workers，域名也不需要托管或迁移到 Cloudflare。
 
+使用 Postman 完成生成兑换码、兑换、查询、解绑和管理员 CRUD，请参阅 [`POSTMAN.md`](./POSTMAN.md)。
+
 ## API
 
 ### 公开查询
