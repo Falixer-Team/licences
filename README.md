@@ -141,7 +141,7 @@ Authorization: Bearer <ADMIN_API_KEY>
 2. 在 Cloudflare Dashboard 中打开 **Storage & databases → D1 SQL database**。
 3. 创建数据库，例如 `falixer-licences`。
 4. 记录数据库 UUID 和 Cloudflare Account ID。
-5. 新数据库在 D1 控制台执行 `schema.sql` 的全部内容。
+5. 新数据库在 D1 控制台执行 `cloudflare-d1-console.sql` 的全部内容。该文件使用最基础的 D1/SQLite 语法，包含授权、兑换码、绑定审计和所需索引。`cloudflare-d1.sql` 是带额外数据约束的严格版本。
 6. 在 **My Profile → API Tokens** 创建 API Token，只授予目标账户的 **D1 Edit** 权限。
 
 ### 已有数据库增加邮箱字段

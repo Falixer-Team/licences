@@ -5,7 +5,7 @@
   "type": "module",
   "packageManager": "pnpm@10.18.3",
   "scripts": {
-    "build": "tsc --noEmit",
+    "build": "node -e \"require('node:fs').mkdirSync('public', { recursive: true })\" && tsc --noEmit",
     "check": "tsc --noEmit"
   },
   "devDependencies": {
