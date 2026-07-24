@@ -21,6 +21,8 @@
     { "source": "/unbind", "destination": "/api/index?route=unbind" },
     { "source": "/admin/licenses", "destination": "/api/index?route=admin" },
     { "source": "/admin/licenses/:id", "destination": "/api/index?route=admin&id=:id" },
-    { "source": "/admin/codes", "destination": "/api/index?route=admin-codes" }
+    { "source": "/admin/codes", "destination": "/api/index?route=admin-codes" },
+    { "source": "/admin/codes/:id", "destination": "/api/index?route=admin-codes&id=:id" },
+    { "source": "/admin/audit", "destination": "/api/index?route=admin-audit" }
   ]
 }

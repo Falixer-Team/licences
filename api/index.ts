@@ -68,6 +68,20 @@ interface CodeInput {
   expiresAt?: unknown
 }
 
+interface CodeUpdateInput {
+  revoked?: unknown
+}
+
+interface AuditRow {
+  id: string
+  license_id: string
+  code_id: string | null
+  action: 'redeemed' | 'unbound'
+  target: string
+  user_email: string
+  created_at: string
+}
+
 interface RedeemInput {
   code?: unknown
   target?: unknown
@@ -634,6 +648,26 @@ async function listLicenses(url: URL, env: Env): Promise<Response> {
   return json({ licenses: rows, limit }, 200, { 'Cache-Control': 'no-store' })
 }
 
+async function getLicense(url: URL, env: Env): Promise<Response> {
+  const id = url.searchParams.get('id')
+  const rawTarget = url.searchParams.get('target')
+  const target = rawTarget ? normalizeTarget(rawTarget) : null
+  if (!id && !target) throw new ClientError('A license id or valid target is required')
+  if (id && !/^[0-9a-f-]{36}$/i.test(id)) throw new ClientError('Invalid license id')
+  if (rawTarget && !target) throw new ClientError('target must be a valid panel domain or IP')
+
+  const license = await new D1Client(env).first<LicenseRow>(
+    `SELECT id, target, user_email, plan, duration, issued_at, expires_at,
+            revoked_at
+     FROM licenses
+     WHERE ${id ? 'id = ?' : 'target = ? COLLATE NOCASE'}
+     LIMIT 1`,
+    [id ?? target],
+  )
+  if (!license) throw new ClientError('License not found', 404)
+  return json({ license }, 200, { 'Cache-Control': 'no-store' })
+}
+
 async function updateLicense(request: Request, id: string, env: Env): Promise<Response> {
   if (!/^[0-9a-f-]{36}$/i.test(id)) throw new ClientError('Invalid license id')
   const body = (await request.json()) as LicenseInput
@@ -691,6 +725,52 @@ async function deleteLicense(id: string, env: Env): Promise<Response> {
   return new Response(null, { status: 204, headers: { 'Cache-Control': 'no-store' } })
 }
 
+async function updateCode(request: Request, id: string, env: Env): Promise<Response> {
+  if (!/^[0-9a-f-]{36}$/i.test(id)) throw new ClientError('Invalid authorization code id')
+  const body = (await request.json()) as CodeUpdateInput
+  if (typeof body.revoked !== 'boolean') {
+    throw new ClientError('revoked must be a boolean')
+  }
+  const revokedAt = body.revoked ? new Date().toISOString() : null
+  const result = await new D1Client(env).query(
+    'UPDATE authorization_codes SET revoked_at = ? WHERE id = ?',
+    [revokedAt, id],
+  )
+  if ((result.meta?.changes ?? 0) === 0) {
+    throw new ClientError('Authorization code not found', 404)
+  }
+  return json({ updated: true, id, revoked: body.revoked }, 200, {
+    'Cache-Control': 'no-store',
+  })
+}
+
+async function deleteCode(id: string, env: Env): Promise<Response> {
+  if (!/^[0-9a-f-]{36}$/i.test(id)) throw new ClientError('Invalid authorization code id')
+  const result = await new D1Client(env).query(
+    'DELETE FROM authorization_codes WHERE id = ? AND redeemed_at IS NULL',
+    [id],
+  )
+  if ((result.meta?.changes ?? 0) === 0) {
+    throw new ClientError('Authorization code not found or is currently redeemed', 409)
+  }
+  return new Response(null, { status: 204, headers: { 'Cache-Control': 'no-store' } })
+}
+
+async function listAudit(url: URL, env: Env): Promise<Response> {
+  const requestedLimit = Number(url.searchParams.get('limit') ?? 50)
+  const limit = Number.isInteger(requestedLimit)
+    ? Math.min(Math.max(requestedLimit, 1), 100)
+    : 50
+  const rows = await new D1Client(env).all<AuditRow>(
+    `SELECT id, license_id, code_id, action, target, user_email, created_at
+     FROM license_binding_audit
+     ORDER BY created_at DESC
+     LIMIT ?`,
+    [String(limit)],
+  )
+  return json({ audit: rows, limit }, 200, { 'Cache-Control': 'no-store' })
+}
+
 async function handle(request: Request): Promise<Response> {
   let env: Env
   try {
@@ -741,7 +821,9 @@ async function handle(request: Request): Promise<Response> {
       }
 
       const id = url.searchParams.get('id')
-      if (request.method === 'GET' && !id) return await listLicenses(url, env)
+      const target = url.searchParams.get('target')
+      if (request.method === 'GET' && (id || target)) return await getLicense(url, env)
+      if (request.method === 'GET') return await listLicenses(url, env)
       if (request.method === 'POST' && !id) return await createLicense(request, env)
       if (request.method === 'PATCH' && id) return await updateLicense(request, id, env)
       if (request.method === 'DELETE' && id) return await deleteLicense(id, env)
@@ -753,8 +835,20 @@ async function handle(request: Request): Promise<Response> {
           'WWW-Authenticate': 'Bearer',
         })
       }
-      if (request.method === 'GET') return await listCodes(url, env)
-      if (request.method === 'POST') return await createCodes(request, env)
+      const id = url.searchParams.get('id')
+      if (request.method === 'GET' && !id) return await listCodes(url, env)
+      if (request.method === 'POST' && !id) return await createCodes(request, env)
+      if (request.method === 'PATCH' && id) return await updateCode(request, id, env)
+      if (request.method === 'DELETE' && id) return await deleteCode(id, env)
+    }
+    if (route === 'admin-audit') {
+      if (!authorized(request, env.ADMIN_API_KEY)) {
+        return json({ error: 'Unauthorized.' }, 401, {
+          'Cache-Control': 'no-store',
+          'WWW-Authenticate': 'Bearer',
+        })
+      }
+      if (request.method === 'GET') return await listAudit(url, env)
     }
 
     return json({ error: 'Not found.' }, 404, { 'Cache-Control': 'no-store' })
