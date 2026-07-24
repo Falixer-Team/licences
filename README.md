@@ -80,6 +80,11 @@ Authorization: Bearer <ADMIN_API_KEY>
 - `DELETE /admin/licenses/:id`：永久删除授权。
 - `GET /admin/codes?limit=50`：列出最近生成的授权码记录（只显示前缀，不返回原码）。
 - `POST /admin/codes`：批量生成绑定特定套餐的一次性授权码。
+- `PATCH /admin/codes/:id`：封禁或恢复兑换码，Body 为 `{ "revoked": true }` 或 `{ "revoked": false }`。
+- `DELETE /admin/codes/:id`：永久删除未兑换的兑换码。
+- `GET /admin/audit?limit=50`：列出最近绑定和解绑审计记录，最多 100 条。
+
+`GET /admin/licenses?target=panel.example.com` 可按域名/IP 返回一条完整授权；`GET /admin/licenses?id=<UUID>` 可按授权 UUID 返回完整授权。
 
 创建个人免费版：
 
